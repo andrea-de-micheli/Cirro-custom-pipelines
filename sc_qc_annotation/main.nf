@@ -18,25 +18,19 @@ params.mt_cutoff = null
 params.expected_doublet_rate = 0.06
 params.skip_doublets = false
 
-// Normalize potentially empty mt_cutoff from form input.
-def normalized_mt_cutoff = (
-    params.mt_cutoff == null || params.mt_cutoff.toString().trim() == ""
-) ? null : params.mt_cutoff
-
-log.info """
-    H5AD Single-Cell QC Pipeline
-    ============================
-    input_dir             : ${params.input_dir}
-    outdir                : ${params.outdir}
-    threads               : ${params.threads}
-    min_genes             : ${params.min_genes}
-    min_counts            : ${params.min_counts}
-    n_mads                : ${params.n_mads}
-    mt_cutoff             : ${normalized_mt_cutoff}
-    expected_doublet_rate : ${params.expected_doublet_rate}
-    skip_doublets         : ${params.skip_doublets}
-    """
-    .stripIndent()
+log.info([
+    "H5AD Single-Cell QC Pipeline",
+    "============================",
+    "input_dir             : ${params.input_dir}",
+    "outdir                : ${params.outdir}",
+    "threads               : ${params.threads}",
+    "min_genes             : ${params.min_genes}",
+    "min_counts            : ${params.min_counts}",
+    "n_mads                : ${params.n_mads}",
+    "mt_cutoff             : ${params.mt_cutoff}",
+    "expected_doublet_rate : ${params.expected_doublet_rate}",
+    "skip_doublets         : ${params.skip_doublets}",
+].join('\n'))
 
 process RUN_SC_QC {
     tag "${sample_name}"
@@ -54,7 +48,7 @@ process RUN_SC_QC {
     path "${sample_name}", emit: qc_results
 
     script:
-    def mt_cutoff_arg = normalized_mt_cutoff != null ? "--mt-cutoff ${normalized_mt_cutoff}" : ""
+    def mt_cutoff_value = params.mt_cutoff == null ? "" : params.mt_cutoff.toString().trim()
     def skip_doublets_arg = params.skip_doublets ? "--skip-doublets" : ""
     """
     set -euo pipefail
@@ -74,8 +68,9 @@ process RUN_SC_QC {
       --expected-doublet-rate ${params.expected_doublet_rate}
     )
 
-    if [[ -n "${mt_cutoff_arg}" ]]; then
-      args+=( ${mt_cutoff_arg} )
+    mt_cutoff_value="${mt_cutoff_value}"
+    if [[ -n "${mt_cutoff_value}" && "${mt_cutoff_value}" != "null" ]]; then
+      args+=( --mt-cutoff "${mt_cutoff_value}" )
     fi
 
     if [[ -n "${skip_doublets_arg}" ]]; then
