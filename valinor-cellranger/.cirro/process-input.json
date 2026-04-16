@@ -1,0 +1,13 @@
+{
+    "multi_config":       "$.dataset.params.multi_config",
+    "feature_reference":  "$.dataset.params.feature_reference",
+    "gex_reference_url":  "$.dataset.params.gex_reference_url",
+    "run_id":             "$.dataset.params.run_id",
+    "fastq_pattern":      "$.dataset.params.fastq_pattern",
+    "create_bam":         "$.dataset.params.create_bam",
+    "cpus":               "$.dataset.params.cpus",
+    "memory_gb":          "$.dataset.params.memory_gb",
+    "disk_gb":            "$.dataset.params.disk_gb",
+    "input_dir":          "$.inputs[*].dataPath",
+    "outdir":             "$.dataset.dataPath"
+}
