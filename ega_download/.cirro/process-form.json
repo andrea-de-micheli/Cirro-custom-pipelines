@@ -1,0 +1,60 @@
+{
+    "ui": {
+        "ega_username": {
+            "ui:help": "Your registered EGA account email address"
+        },
+        "ega_password": {
+            "ui:widget": "password",
+            "ui:help": "Your EGA account password. Stored only long enough to build the pyega3 credentials file; removed from the Nextflow params log before the workflow starts."
+        },
+        "accession_list_file": {
+            "ui:help": "Upload a text file with EGA accessions, one per line. Both dataset IDs (EGAD*) and file IDs (EGAF*) are supported."
+        },
+        "connections": {
+            "ui:help": "Number of parallel connections pyega3 opens per file. Higher values speed up large downloads but are more likely to be throttled."
+        },
+        "max_file_size": {
+            "ui:help": "Allocate disk space based on the largest expected file. Larger values allow bigger files but may increase costs."
+        }
+    },
+    "form": {
+        "title": "EGA Download",
+        "description": "Download EGA data using pyega3 with username/password authentication",
+        "type": "object",
+        "required": ["ega_username", "ega_password", "accession_list_file"],
+        "properties": {
+            "ega_username": {
+                "title": "EGA Username (email)",
+                "description": "Your registered EGA account email address",
+                "type": "string"
+            },
+            "ega_password": {
+                "title": "EGA Password",
+                "description": "Your EGA account password",
+                "type": "string"
+            },
+            "accession_list_file": {
+                "title": "Accession List File",
+                "description": "Upload a text file (.txt) containing EGA accessions, one per line (EGAD* or EGAF*)",
+                "type": "string",
+                "format": "data-url"
+            },
+            "connections": {
+                "title": "Parallel Connections",
+                "description": "Number of parallel connections pyega3 opens per file download (1-20)",
+                "type": "integer",
+                "default": 5,
+                "minimum": 1,
+                "maximum": 20
+            },
+            "max_file_size": {
+                "title": "Max Expected File Size (GB)",
+                "description": "Maximum expected size for a single EGA file. Determines the disk space allocated per task (50-1000 GB)",
+                "type": "integer",
+                "default": 500,
+                "minimum": 50,
+                "maximum": 1000
+            }
+        }
+    }
+}

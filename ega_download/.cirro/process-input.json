@@ -1,0 +1,8 @@
+{
+    "ega_username": "$.dataset.params.ega_username",
+    "ega_password": "$.dataset.params.ega_password",
+    "accession_list_file": "$.dataset.params.accession_list_file",
+    "connections": "$.dataset.params.connections",
+    "max_file_size": "$.dataset.params.max_file_size",
+    "outdir": "$.dataset.dataPath"
+}
