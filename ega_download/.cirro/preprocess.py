@@ -5,12 +5,17 @@ Preprocess script for EGA Download pipeline.
 Builds the pyega3 credentials JSON from the username/password form fields,
 extracts the uploaded accession list from its data URL, and rewrites the
 params so that the Nextflow workflow receives file paths instead of secrets.
+
+Reads/writes params.json directly instead of using
+PreprocessDataset.from_running(), which requires a config/files.csv that is
+not staged on resume runs (causes FileNotFoundError on resume).
 """
 
 import os
 import json
 import base64
-from cirro.helpers.preprocess_dataset import PreprocessDataset
+
+PARAMS_PATH = "params.json"
 
 
 def extract_file_from_data_url(data_url, output_path):
@@ -28,10 +33,11 @@ def extract_file_from_data_url(data_url, output_path):
 
 
 def main():
-    ds = PreprocessDataset.from_running()
+    with open(PARAMS_PATH) as f:
+        params = json.load(f)
 
-    username = ds.params.get('ega_username')
-    password = ds.params.get('ega_password')
+    username = params.get('ega_username')
+    password = params.get('ega_password')
     if not username or not password:
         raise ValueError("EGA username and password are both required")
 
@@ -40,21 +46,23 @@ def main():
         json.dump({"username": username, "password": password}, f)
     os.chmod(credentials_path, 0o600)
 
-    # Drop the plaintext credentials from the run params so they don't end up
-    # in the Nextflow params log, then hand the workflow a file path instead.
-    ds.remove_param("ega_username")
-    ds.remove_param("ega_password")
-    ds.add_param("credentials_file", credentials_path, overwrite=True)
-
-    accession_data_url = ds.params.get('accession_list_file')
+    accession_data_url = params.get('accession_list_file')
     if not accession_data_url:
         raise ValueError("Accession list file is required")
 
     accession_list_path = extract_file_from_data_url(
         accession_data_url, "accession_list.txt"
     )
-    ds.remove_param("accession_list_file")
-    ds.add_param("accession_list_file", accession_list_path, overwrite=True)
+
+    # Drop the plaintext credentials from the run params so they don't end up
+    # in the Nextflow params log, then hand the workflow file paths instead.
+    params.pop("ega_username", None)
+    params.pop("ega_password", None)
+    params["credentials_file"] = credentials_path
+    params["accession_list_file"] = accession_list_path
+
+    with open(PARAMS_PATH, "w") as f:
+        json.dump(params, f, indent=2)
 
     with open(accession_list_path, 'r') as f:
         accession_count = len([
