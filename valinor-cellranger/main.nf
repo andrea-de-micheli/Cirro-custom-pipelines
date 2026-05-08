@@ -3,32 +3,34 @@ nextflow.enable.dsl=2
 
 /*
  * valinor-cellranger
- * Runs `cellranger multi` on an input FASTQ dataset using a user-supplied
- * multi_config.csv and feature reference CSV. One invocation = one pool.
+ *
+ * Runs `cellranger multi` across one or more pools driven by a samplesheet.
+ * One CELLRANGER_MULTI task per run_id. Reference is downloaded once and
+ * fanned out as a value channel.
  */
 
-// Parameters (populated by Cirro via .cirro/process-input.json)
-params.multi_config        = null
-params.feature_reference   = null
-params.gex_reference_url   = 'https://cf.10xgenomics.com/supp/cell-exp/refdata-gex-GRCh38-2024-A.tar.gz'
-params.run_id              = null
-params.fastq_pattern       = '*.fastq.gz'
-params.create_bam          = false
-params.cpus                = 16
-params.memory_gb           = 128
-params.disk_gb             = 2000
-params.input_dir           = null
-params.outdir              = 'results'
+// Parameters (populated by Cirro via .cirro/process-input.json + preprocess.py)
+params.pool_dir          = null      // Directory containing pools.tsv + per-pool multi_config CSVs (preprocess output)
+params.feature_reference = null      // Decoded feature_reference.csv
+params.gex_reference_url = 'https://cf.10xgenomics.com/supp/cell-exp/refdata-gex-GRCh38-2024-A.tar.gz'
+params.create_bam        = false
+params.cpus              = 30
+params.memory_gb         = 200
+params.disk_gb           = 2000
+params.input_dir         = null      // S3 path to the FASTQ input dataset
+params.outdir            = 'results'
+
+if (!params.pool_dir)          { error "pool_dir is required (set by preprocess)" }
+if (!params.feature_reference) { error "feature_reference is required" }
+if (!params.input_dir)         { error "input_dir is required" }
 
 log.info """
     valinor-cellranger
     ==================
-    run_id            : ${params.run_id}
-    multi_config      : ${params.multi_config}
+    pool_dir          : ${params.pool_dir}
     feature_reference : ${params.feature_reference}
     gex_reference_url : ${params.gex_reference_url}
     input_dir         : ${params.input_dir}
-    fastq_pattern     : ${params.fastq_pattern}
     create_bam        : ${params.create_bam}
     cpus              : ${params.cpus}
     memory_gb         : ${params.memory_gb}
@@ -37,13 +39,9 @@ log.info """
     """
     .stripIndent()
 
-if (!params.multi_config)      { error "multi_config is required" }
-if (!params.feature_reference) { error "feature_reference is required" }
-if (!params.run_id)            { error "run_id is required" }
-if (!params.input_dir)         { error "input_dir is required" }
 
 /*
- * Download and extract the 10x GEX reference fresh each run (self-contained).
+ * Download and extract the 10x GEX reference once per pipeline run.
  */
 process DOWNLOAD_REFERENCE {
     tag "${url.tokenize('/').last()}"
@@ -74,11 +72,14 @@ process DOWNLOAD_REFERENCE {
     """
 }
 
+
 /*
- * Run cellranger multi.
+ * Run cellranger multi for one pool.
  *
- * Stages a subset of FASTQs from the input dataset, rewrites the user's
- * multi_config.csv to point at staged paths, then invokes cellranger.
+ *  - Stages just the FASTQs whose object names start with this pool's
+ *    fastq_id values, via repeated `aws s3 cp --include`.
+ *  - Substitutes the three placeholders left by preprocess
+ *    (__GEX_REF__, __FEATURE_REF__, __FASTQS__) into the multi_config.
  */
 process CELLRANGER_MULTI {
     tag "${run_id}"
@@ -92,113 +93,76 @@ process CELLRANGER_MULTI {
     publishDir "${params.outdir}", mode: 'copy', pattern: "${run_id}/outs/**"
     publishDir "${params.outdir}", mode: 'copy', pattern: "${run_id}/_log"
     publishDir "${params.outdir}", mode: 'copy', pattern: "${run_id}/*.mri.tgz"
-    publishDir "${params.outdir}", mode: 'copy', pattern: "multi_config.rewritten.csv"
+    publishDir "${params.outdir}", mode: 'copy', pattern: "${run_id}.multi_config.resolved.csv"
 
     input:
-    path config
-    path feature_ref
-    path ref_dir
-    val  input_dir
-    val  run_id
-    val  fastq_pattern
-    val  create_bam
+    tuple val(run_id), path(config), val(fastq_ids)
+    path  feature_ref
+    path  ref_dir
+    val   input_dir
 
     output:
-    path "${run_id}/outs/**",      emit: outs
-    path "${run_id}/_log",         emit: run_log, optional: true
-    path "${run_id}/*.mri.tgz",    emit: mri,     optional: true
-    path "multi_config.rewritten.csv", emit: rewritten_config
+    path "${run_id}/outs/**",                    emit: outs
+    path "${run_id}/_log",                       emit: run_log,  optional: true
+    path "${run_id}/*.mri.tgz",                  emit: mri,      optional: true
+    path "${run_id}.multi_config.resolved.csv",  emit: resolved_config
 
     script:
+    def includes = fastq_ids.tokenize('|').collect { "--include '${it}*'" }.join(' ')
     """
     set -euo pipefail
 
-    echo "=== Staging FASTQs from ${input_dir} matching '${fastq_pattern}' ==="
+    echo "=== Staging FASTQs from ${input_dir} for pool ${run_id} ==="
+    echo "fastq_id prefixes: ${fastq_ids}"
     mkdir -p fastqs
-    aws s3 cp --recursive --exclude '*' --include '${fastq_pattern}' \\
+    aws s3 cp --recursive --exclude '*' ${includes} \\
         "${input_dir}" fastqs/
-    echo "Staged \$(ls fastqs | wc -l) FASTQ files."
+    n_fq=\$(find fastqs -type f -name '*.fastq.gz' | wc -l)
+    echo "Staged \${n_fq} FASTQ files."
+    if [ "\${n_fq}" -eq 0 ]; then
+        echo "ERROR: no FASTQ files matched fastq_id prefixes ${fastq_ids}" >&2
+        exit 1
+    fi
 
-    echo "=== Rewriting multi_config paths ==="
-    # Absolute paths for cellranger (it resolves paths relative to pwd otherwise).
     REF_ABS="\$(readlink -f ${ref_dir})"
     FEAT_ABS="\$(readlink -f ${feature_ref})"
     FQ_ABS="\$(readlink -f fastqs)"
 
-    python3 - <<PY
-import re, pathlib
-src = pathlib.Path("${config}").read_text()
-ref_abs  = "\${REF_ABS}"
-feat_abs = "\${FEAT_ABS}"
-fq_abs   = "\${FQ_ABS}"
-create_bam = "${create_bam}".lower()
+    sed -e "s|__GEX_REF__|\${REF_ABS}|g" \\
+        -e "s|__FEATURE_REF__|\${FEAT_ABS}|g" \\
+        -e "s|__FASTQS__|\${FQ_ABS}|g" \\
+        "${config}" > "${run_id}.multi_config.resolved.csv"
 
-lines = src.splitlines()
-out, section = [], None
-for line in lines:
-    s = line.strip()
-    if s.startswith("[") and s.endswith("]"):
-        section = s.strip("[]").lower()
-        out.append(line); continue
-    if section == "gene-expression":
-        if line.lower().startswith("reference,"):
-            line = f"reference,{ref_abs}"
-        elif line.lower().startswith("create-bam,"):
-            line = f"create-bam,{create_bam}"
-    elif section == "feature":
-        if line.lower().startswith("reference,"):
-            line = f"reference,{feat_abs}"
-    elif section == "libraries":
-        # Header row: fastq_id,fastqs,feature_types
-        parts = line.split(",")
-        if len(parts) >= 3 and parts[0].strip() and parts[0].strip().lower() != "fastq_id":
-            parts[1] = fq_abs
-            line = ",".join(parts)
-    out.append(line)
-
-# Ensure create-bam present
-if not any(l.lower().startswith("create-bam,") for l in out):
-    # Insert under [gene-expression] section
-    new = []
-    inserted = False
-    for l in out:
-        new.append(l)
-        if not inserted and l.strip().lower() == "[gene-expression]":
-            inserted = True
-        elif inserted and (l.strip().startswith("[") or l.strip() == "") and not l.strip().lower() == "[gene-expression]":
-            if not inserted:
-                pass
-    out = new
-
-pathlib.Path("multi_config.rewritten.csv").write_text("\\n".join(out) + "\\n")
-print("Rewritten config:")
-print(pathlib.Path("multi_config.rewritten.csv").read_text())
-PY
+    echo "=== Resolved multi_config ==="
+    cat "${run_id}.multi_config.resolved.csv"
 
     echo "=== Running cellranger multi ==="
     cellranger multi \\
         --id=${run_id} \\
-        --csv=multi_config.rewritten.csv \\
+        --csv=${run_id}.multi_config.resolved.csv \\
         --localcores=${task.cpus} \\
         --localmem=${params.memory_gb} \\
         --disable-ui
 
-    echo "=== Done ==="
+    echo "=== Done ${run_id} ==="
     ls -la ${run_id}/outs/ || true
     """
 }
 
+
 workflow {
     ref_ch = DOWNLOAD_REFERENCE(Channel.value(params.gex_reference_url)).ref_dir
 
+    pools_ch = Channel
+        .fromPath("${params.pool_dir}/pools.tsv")
+        .splitCsv(header: true, sep: '\t')
+        .map { row -> tuple(row.run_id, file(row.config), row.fastq_ids) }
+
     CELLRANGER_MULTI(
-        file(params.multi_config),
+        pools_ch,
         file(params.feature_reference),
         ref_ch,
-        params.input_dir,
-        params.run_id,
-        params.fastq_pattern,
-        params.create_bam
+        params.input_dir
     )
 }
 

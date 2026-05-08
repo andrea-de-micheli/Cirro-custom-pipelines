@@ -1,67 +1,59 @@
 {
     "ui": {
-        "multi_config": {
-            "ui:help": "Upload the cellranger multi config CSV for this pool (one pool per run). Must contain [gene-expression], [feature], [libraries], and [samples] sections."
+        "libraries_sheet": {
+            "ui:help": "CSV with one row per (pool x library). Columns: run_id, fastq_id, library_type. See pipeline README for format and examples."
+        },
+        "samples_sheet": {
+            "ui:help": "CSV with one row per demultiplexed sample. Columns: run_id, sample_id, hashtag_ids (pipe-separated for multi-tag samples). See pipeline README."
         },
         "feature_reference": {
-            "ui:help": "Upload the merged feature reference CSV — HTO hashtags + TotalSeq-B (or any CITE-seq) antibody rows. IDs must not contain whitespace or parentheses."
+            "ui:help": "10x feature reference CSV. HTO rows MUST use feature_type='Multiplexing Capture' (used by cellranger for sample demux); CITE-seq antibodies MUST use feature_type='Antibody Capture'. See pipeline README."
         },
         "gex_reference_url": {
-            "ui:help": "URL or s3:// URI to a 10x GEX reference tarball. Default is human GRCh38 2024-A. The pipeline downloads this fresh each run."
-        },
-        "run_id": {
-            "ui:help": "Name for this run's output directory (e.g., Pool1_CD138_Neg). Must be unique per dataset."
-        },
-        "fastq_pattern": {
-            "ui:help": "Glob filter applied when copying FASTQ objects from the input dataset onto the worker. Default *.fastq.gz stages everything. Use e.g. 'Pool1_*' to stage only one pool's files."
+            "ui:help": "URL or s3:// URI to a 10x GEX reference tarball. Default is human GRCh38 2024-A. Downloaded once per run and shared across all pools."
         },
         "create_bam": {
-            "ui:help": "If checked, cellranger writes position-sorted BAMs (adds tens of GB per sample). Off by default."
+            "ui:help": "If checked, cellranger writes position-sorted BAMs (adds tens of GB per sample). Off by default. Applies to every pool."
         },
         "cpus": {
-            "ui:help": "localcores for cellranger. Match to the Batch instance vCPU count."
+            "ui:help": "localcores per pool. Match to the Batch instance vCPU count."
         },
         "memory_gb": {
-            "ui:help": "localmem for cellranger (GB). Match to the Batch instance memory, leaving ~8 GB headroom."
+            "ui:help": "localmem per pool (GB). Match to the Batch instance memory, leaving ~8 GB headroom."
         },
         "disk_gb": {
-            "ui:help": "Scratch space for the worker. Cellranger multi keeps MAKE_SHARD + alignment intermediates simultaneously; budget ~5x the FASTQ input size."
+            "ui:help": "Scratch space per pool. Budget ~5x the staged FASTQ size."
         }
     },
     "form": {
         "title": "Valinor Cellranger Multi",
-        "description": "Run cellranger multi (GEX + CITE-seq + HTO demultiplexing) against an input FASTQ dataset on AWS Batch. One pool per run.",
+        "description": "Run cellranger multi (GEX + CITE-seq + HTO demux) across one or more pools driven by a samplesheet. One cellranger-multi invocation per run_id. Reference download and form uploads are shared across all pools.",
         "type": "object",
-        "required": ["multi_config", "feature_reference", "gex_reference_url", "run_id"],
+        "required": ["libraries_sheet", "samples_sheet", "feature_reference", "gex_reference_url"],
         "properties": {
-            "multi_config": {
-                "title": "Multi Config CSV",
-                "description": "cellranger multi config CSV for this pool",
+            "libraries_sheet": {
+                "title": "Libraries Samplesheet (CSV)",
+                "description": "Columns: run_id, fastq_id, library_type",
+                "type": "string",
+                "format": "data-url"
+            },
+            "samples_sheet": {
+                "title": "Samples Samplesheet (CSV)",
+                "description": "Columns: run_id, sample_id, hashtag_ids",
                 "type": "string",
                 "format": "data-url"
             },
             "feature_reference": {
                 "title": "Feature Reference CSV",
-                "description": "Feature reference CSV — HTO + CITE-seq antibody rows. IDs must not contain whitespace or parens.",
+                "description": "10x feature reference; HTOs as 'Multiplexing Capture', antibodies as 'Antibody Capture'",
                 "type": "string",
                 "format": "data-url"
             },
             "gex_reference_url": {
                 "title": "GEX Reference URL",
-                "description": "HTTPS URL or s3:// URI to the 10x GEX reference tarball (downloaded fresh each run)",
+                "description": "HTTPS URL or s3:// URI to the 10x GEX reference tarball",
                 "type": "string",
                 "default": "https://cf.10xgenomics.com/supp/cell-exp/refdata-gex-GRCh38-2024-A.tar.gz"
-            },
-            "run_id": {
-                "title": "Run ID",
-                "description": "Output directory name for this run (e.g., Pool1_CD138_Neg)",
-                "type": "string"
-            },
-            "fastq_pattern": {
-                "title": "FASTQ Pattern",
-                "description": "Glob filter for which files to stage from the input dataset",
-                "type": "string",
-                "default": "*.fastq.gz"
             },
             "create_bam": {
                 "title": "Create BAM",
@@ -70,23 +62,23 @@
                 "default": false
             },
             "cpus": {
-                "title": "CPUs",
+                "title": "CPUs per pool",
                 "description": "cellranger --localcores",
                 "type": "integer",
-                "default": 16,
+                "default": 30,
                 "minimum": 4,
                 "maximum": 96
             },
             "memory_gb": {
-                "title": "Memory (GB)",
+                "title": "Memory per pool (GB)",
                 "description": "cellranger --localmem",
                 "type": "integer",
-                "default": 128,
+                "default": 200,
                 "minimum": 32,
                 "maximum": 768
             },
             "disk_gb": {
-                "title": "Disk (GB)",
+                "title": "Disk per pool (GB)",
                 "description": "Worker scratch space",
                 "type": "integer",
                 "default": 2000,
