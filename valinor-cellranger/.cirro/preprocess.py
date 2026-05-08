@@ -4,9 +4,13 @@ Preprocess for valinor-cellranger.
 
 Inputs from the form (all data-URLs):
   - libraries_sheet:   CSV with columns run_id, fastq_id, library_type
-  - samples_sheet:     CSV with columns run_id, sample_id, hashtag_ids
+  - samples_sheet:     CSV with columns run_id, sample_id, and either
+                       'hashtag_ids' (cell-hashing demux) or 'cmo_ids'
+                       (CMO / Multiplexing Capture demux). The chosen column
+                       name is passed through to cellranger's [samples] section
+                       — that is exactly how cellranger picks the demux mode.
   - feature_reference: 10x feature_reference.csv
-                       (id, name, read, pattern, sequence, feature_type)
+                       (id, name, read, pattern, sequence, feature_type).
 
 For each unique run_id this script generates a multi_config CSV with three
 runtime placeholders (__GEX_REF__, __FEATURE_REF__, __FASTQS__) that main.nf
@@ -14,12 +18,12 @@ substitutes on the worker after staging.
 
 Validation done here (so failures land in the control plane, not after an
 hour of Batch boot):
-  - feature_reference contains at least one row with
-    feature_type='Multiplexing Capture' (HTO rows for cellranger demux).
-  - Every hashtag_ids value referenced in samples_sheet exists as an HTO id
-    in feature_reference.
+  - feature_reference is non-empty and ids contain no whitespace or parens.
+  - Every value in samples_sheet's hashtag_ids/cmo_ids column exists as an
+    id in feature_reference.
   - Every run_id present in libraries_sheet is also present in samples_sheet
     and contains a 'Gene Expression' library row.
+  - Every fastq_id prefix matches at least one file in the input dataset.
 """
 
 import base64
@@ -40,6 +44,10 @@ VALID_LIBRARY_TYPES = {
     "VDJ-T",
     "VDJ-B",
 }
+
+# Cellranger multi accepts either column name in [samples]; whichever the
+# user chose in samples_sheet is what we pass through.
+SAMPLE_TAG_COLUMNS = ("hashtag_ids", "cmo_ids")
 
 
 def decode_data_url(data_url: str, output_path: str) -> str:
@@ -67,34 +75,27 @@ def require_columns(rows: list, required: set, sheet_name: str) -> None:
         raise ValueError(f"{sheet_name} missing columns: {sorted(missing)}")
 
 
-def validate_feature_reference(rows: list) -> tuple:
+def validate_feature_reference(rows: list) -> set:
+    """Return the set of all feature ids."""
     require_columns(rows, {"id", "feature_type"}, "feature_reference")
-    by_type = defaultdict(set)
+    feature_ids = set()
     bad_ids = []
     for r in rows:
         fid = r.get("id") or ""
-        ftype = r.get("feature_type") or ""
         if not fid:
             continue
         if re.search(r"\s", fid) or "(" in fid or ")" in fid:
             bad_ids.append(fid)
-        by_type[ftype].add(fid)
-
+        feature_ids.add(fid)
     if bad_ids:
         preview = ", ".join(repr(x) for x in bad_ids[:5])
         raise ValueError(
             f"feature_reference has {len(bad_ids)} id(s) with whitespace or parens "
             f"(cellranger will reject these): {preview}"
         )
-
-    htos = by_type.get("Multiplexing Capture", set())
-    adts = by_type.get("Antibody Capture", set())
-    if not htos:
-        raise ValueError(
-            "feature_reference must contain at least one row with "
-            "feature_type='Multiplexing Capture' (HTOs for cellranger sample demux)"
-        )
-    return htos, adts
+    if not feature_ids:
+        raise ValueError("feature_reference is empty")
+    return feature_ids
 
 
 def validate_libraries(rows: list) -> list:
@@ -112,28 +113,51 @@ def validate_libraries(rows: list) -> list:
     return rows
 
 
-def validate_samples(rows: list, htos: set) -> list:
-    require_columns(rows, {"run_id", "sample_id", "hashtag_ids"}, "samples sheet")
+def validate_samples(rows: list, feature_ids: set) -> tuple:
+    """Return (rows, tag_column_name) where tag_column_name is whichever of
+    'hashtag_ids' or 'cmo_ids' the user used (cellranger picks the demux
+    mode by that column name)."""
+    if not rows:
+        raise ValueError("samples sheet is empty")
+    headers = set(rows[0].keys())
+    base_required = {"run_id", "sample_id"}
+    missing = base_required - headers
+    if missing:
+        raise ValueError(f"samples sheet missing columns: {sorted(missing)}")
+
+    present = [c for c in SAMPLE_TAG_COLUMNS if c in headers]
+    if len(present) == 0:
+        raise ValueError(
+            f"samples sheet must contain one of: {list(SAMPLE_TAG_COLUMNS)} "
+            f"(found columns: {sorted(headers)})"
+        )
+    if len(present) > 1:
+        raise ValueError(
+            f"samples sheet must contain exactly one of {list(SAMPLE_TAG_COLUMNS)}, "
+            f"got both: {present}"
+        )
+    tag_col = present[0]
+
     for r in rows:
         if not (r.get("run_id") and r.get("sample_id")):
             raise ValueError(f"samples sheet has a row missing run_id or sample_id: {r}")
-        tags = [h.strip() for h in (r.get("hashtag_ids") or "").split("|") if h.strip()]
+        tags = [h.strip() for h in (r.get(tag_col) or "").split("|") if h.strip()]
         if not tags:
             raise ValueError(
-                f"samples sheet row has empty hashtag_ids "
+                f"samples sheet row has empty {tag_col} "
                 f"(run_id={r['run_id']}, sample_id={r['sample_id']})"
             )
-        unknown = [h for h in tags if h not in htos]
+        unknown = [h for h in tags if h not in feature_ids]
         if unknown:
             raise ValueError(
-                f"samples sheet hashtag_ids {unknown} (run_id={r['run_id']}, "
-                f"sample_id={r['sample_id']}) are not declared as Multiplexing Capture "
-                f"in feature_reference. Known HTOs: {sorted(htos)}"
+                f"samples sheet {tag_col} {unknown} (run_id={r['run_id']}, "
+                f"sample_id={r['sample_id']}) are not present as ids in feature_reference."
             )
-    return rows
+    return rows, tag_col
 
 
-def write_multi_config(out_path: str, libs: list, samples: list, create_bam: bool) -> None:
+def write_multi_config(out_path: str, libs: list, samples: list,
+                       tag_col: str, create_bam: bool) -> None:
     cb = "true" if str(create_bam).lower() in ("1", "true", "yes") else "false"
     lines = [
         "[gene-expression]",
@@ -148,10 +172,10 @@ def write_multi_config(out_path: str, libs: list, samples: list, create_bam: boo
     ]
     for r in libs:
         lines.append(f"{r['fastq_id']},__FASTQS__,{r['library_type']}")
-    lines += ["", "[samples]", "sample_id,cmo_ids"]
+    lines += ["", "[samples]", f"sample_id,{tag_col}"]
     for r in samples:
-        cmo = "|".join(h.strip() for h in (r["hashtag_ids"] or "").split("|") if h.strip())
-        lines.append(f"{r['sample_id']},{cmo}")
+        ids = "|".join(h.strip() for h in (r[tag_col] or "").split("|") if h.strip())
+        lines.append(f"{r['sample_id']},{ids}")
     with open(out_path, "w") as fh:
         fh.write("\n".join(lines) + "\n")
 
@@ -164,14 +188,12 @@ def main() -> None:
     samples_path = decode_data_url(ds.params.get("samples_sheet"), "samples.csv")
     feat_path = decode_data_url(ds.params.get("feature_reference"), "feature_reference.csv")
 
-    htos, adts = validate_feature_reference(read_csv_rows(feat_path))
-    ds.logger.info(
-        f"feature_reference: {len(htos)} HTO (Multiplexing Capture), "
-        f"{len(adts)} ADT (Antibody Capture)"
-    )
+    feature_ids = validate_feature_reference(read_csv_rows(feat_path))
+    ds.logger.info(f"feature_reference: {len(feature_ids)} feature id(s)")
 
     lib_rows = validate_libraries(read_csv_rows(libs_path))
-    sam_rows = validate_samples(read_csv_rows(samples_path), htos)
+    sam_rows, tag_col = validate_samples(read_csv_rows(samples_path), feature_ids)
+    ds.logger.info(f"samples_sheet uses {tag_col!r} -> cellranger demux mode follows that column")
 
     # Cross-check fastq_id prefixes against the actual input dataset so a typo
     # fails here, not after Batch boot. Tolerant to ds.files API variants.
@@ -221,11 +243,6 @@ def main() -> None:
             raise ValueError(
                 f"run_id {rid!r}: libraries_sheet must contain a 'Gene Expression' row"
             )
-        if "Multiplexing Capture" not in types:
-            raise ValueError(
-                f"run_id {rid!r}: libraries_sheet must contain a 'Multiplexing Capture' row "
-                f"(HTO library) — HTO demux requires it"
-            )
 
     out_dir = os.path.abspath("generated_configs")
     os.makedirs(out_dir, exist_ok=True)
@@ -236,7 +253,7 @@ def main() -> None:
         fh.write("run_id\tconfig\tfastq_ids\n")
         for rid in run_ids:
             cfg_path = os.path.join(out_dir, f"{rid}.multi_config.csv")
-            write_multi_config(cfg_path, libs_by_run[rid], sams_by_run[rid], create_bam)
+            write_multi_config(cfg_path, libs_by_run[rid], sams_by_run[rid], tag_col, create_bam)
             fastq_ids = sorted({r["fastq_id"] for r in libs_by_run[rid]})
             fh.write(f"{rid}\t{cfg_path}\t{'|'.join(fastq_ids)}\n")
             ds.logger.info(

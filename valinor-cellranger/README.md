@@ -39,11 +39,13 @@ MIX2_Prep1,Mix102-11-X-Prep1-CS,Antibody Capture
 | `fastq_id` | The library prefix in the FASTQ filenames (`<fastq_id>_S?_L00?_R?_001.fastq.gz`). The pipeline copies any object whose key starts with `<fastq_id>` from the input dataset onto the worker. |
 | `library_type` | One of: `Gene Expression`, `Antibody Capture`, `Multiplexing Capture`, `CRISPR Guide Capture`, `VDJ`, `VDJ-T`, `VDJ-B`. |
 
-Each `run_id` must include exactly one `Gene Expression` row and at least one `Multiplexing Capture` row (HTO library). Same `fastq_id` may appear under two `library_type`s (one library, multiple feature classes).
+Each `run_id` must include exactly one `Gene Expression` row plus the library that carries the demux tags (`Antibody Capture` for cell-hashing mode, `Multiplexing Capture` for CMO mode). Same `fastq_id` may appear under two `library_type`s (one library, multiple feature classes).
 
 ### `samples_sheet`
 
-One row per demultiplexed sample.
+One row per demultiplexed sample. The third column name selects the cellranger demux flow — use exactly one of `hashtag_ids` (cell-hashing) or `cmo_ids` (CMO / Multiplexing Capture). Whichever you pick is passed through verbatim to the generated `[samples]` section, which is exactly how cellranger picks the mode.
+
+**Cell-hashing mode** (HTO antibodies; produces `tag_calls_summary.csv`):
 
 ```csv
 run_id,sample_id,hashtag_ids
@@ -51,35 +53,55 @@ MIX1_Prep1,Patient_001_T1,HTO1
 MIX1_Prep1,Patient_001_T2,HTO2
 MIX1_Prep1,Patient_002_T1,HTO3
 MIX1_Prep1,Patient_002_T2,HTO4
-MIX2_Prep1,Patient_003_T1,HTO1
-MIX2_Prep1,Patient_003_T2,HTO2
+```
+
+**CMO / Multiplexing Capture mode** (cellranger-managed CMO library):
+
+```csv
+run_id,sample_id,cmo_ids
+MIX1_Prep1,Patient_001_T1,CMO301
+MIX1_Prep1,Patient_001_T2,CMO302
 ```
 
 | Column | Meaning |
 |---|---|
 | `run_id` | Must match a `run_id` in `libraries_sheet`. |
 | `sample_id` | Becomes a `per_sample_outs/<sample_id>/` directory. |
-| `hashtag_ids` | One HTO `id` from `feature_reference` (with `feature_type=Multiplexing Capture`). For multi-tagged samples, pipe-separate: `HTO1\|HTO2`. |
+| `hashtag_ids` *or* `cmo_ids` | One HTO/CMO `id` from `feature_reference`. For multi-tagged samples, pipe-separate: `HTO1\|HTO2`. |
 
-Every value in `hashtag_ids` is checked against the `feature_reference` upfront — typos fail in the control plane, not after Batch boot.
+Every tag id is checked against the `feature_reference` upfront — typos fail in the control plane, not after Batch boot.
 
 ## Feature reference format
 
-Standard 10x feature reference CSV. **HTO rows must use `feature_type=Multiplexing Capture`; antibody (CITE-seq) rows must use `feature_type=Antibody Capture`.** This is how the pipeline tells them apart and is also what cellranger consumes — HTO ids referenced in the `samples_sheet` are matched to `Multiplexing Capture` rows here.
+Standard 10x feature reference CSV. The pipeline doesn't enforce a particular `feature_type` for the HTO/CMO rows — it just checks that every id you reference in `samples_sheet` is present here. **Use the `feature_type` value that matches your demux mode**, since cellranger reads it:
+
+| Demux mode | HTO `feature_type` | HTO library `library_type` |
+|---|---|---|
+| Cell hashing (`hashtag_ids`) | `Antibody Capture` | `Antibody Capture` |
+| CMO (`cmo_ids`) | `Multiplexing Capture` | `Multiplexing Capture` |
+
+**Example — cell-hashing mode** (HTO antibodies + CITE-seq panel in one CSV):
 
 ```csv
 id,name,read,pattern,sequence,feature_type
-HTO1,HTO1,R2,5P(BC),GTCAACTCTTTAGCG,Multiplexing Capture
-HTO2,HTO2,R2,5P(BC),TGATGGCCTATTGGG,Multiplexing Capture
-HTO3,HTO3,R2,5P(BC),TTCCGCCTCTCTTTG,Multiplexing Capture
-HTO4,HTO4,R2,5P(BC),AGTAAGTTCAGCGTA,Multiplexing Capture
-CD3,CD3_TotalSeqC,R2,5P(BC),CTCATTGTAACTCCT,Antibody Capture
-CD4,CD4_TotalSeqC,R2,5P(BC),TGTTCCCGCTCAACT,Antibody Capture
-CD8a,CD8a_TotalSeqC,R2,5P(BC),GCGCAACTTGATGAT,Antibody Capture
+HTO1,HTO1,R2,5PNNNNNNNNNN(BC),GTCAACTCTTTAGCG,Antibody Capture
+HTO2,HTO2,R2,5PNNNNNNNNNN(BC),TGATGGCCTATTGGG,Antibody Capture
+HTO3,HTO3,R2,5PNNNNNNNNNN(BC),TTCCGCCTCTCTTTG,Antibody Capture
+HTO4,HTO4,R2,5PNNNNNNNNNN(BC),AGTAAGTTCAGCGTA,Antibody Capture
+CD3,CD3_TotalSeqC,R2,5PNNNNNNNNNN(BC),CTCATTGTAACTCCT,Antibody Capture
+CD4,CD4_TotalSeqC,R2,5PNNNNNNNNNN(BC),TGTTCCCGCTCAACT,Antibody Capture
+```
+
+**Example — CMO mode**:
+
+```csv
+id,name,read,pattern,sequence,feature_type
+CMO301,CMO301,R2,5P(BC),ATGAGGAATTCCTGC,Multiplexing Capture
+CMO302,CMO302,R2,5P(BC),CATGCCAATAGAGCG,Multiplexing Capture
+CD3,CD3_TotalSeqC,R2,5PNNNNNNNNNN(BC),CTCATTGTAACTCCT,Antibody Capture
 ```
 
 Constraints (validated in preprocess):
-- At least one row with `feature_type=Multiplexing Capture` (HTO).
 - No `id` may contain whitespace or parentheses.
 - Sequences and `pattern` follow 10x conventions — pipeline does not transform them.
 

@@ -4,10 +4,10 @@
             "ui:help": "CSV with one row per (pool x library). Columns: run_id, fastq_id, library_type. See pipeline README for format and examples."
         },
         "samples_sheet": {
-            "ui:help": "CSV with one row per demultiplexed sample. Columns: run_id, sample_id, hashtag_ids (pipe-separated for multi-tag samples). See pipeline README."
+            "ui:help": "CSV with one row per demultiplexed sample. Columns: run_id, sample_id, and one of {hashtag_ids, cmo_ids} (pipe-separated for multi-tag samples). The column name selects cellranger's demux mode. See pipeline README."
         },
         "feature_reference": {
-            "ui:help": "10x feature reference CSV. HTO rows MUST use feature_type='Multiplexing Capture' (used by cellranger for sample demux); CITE-seq antibodies MUST use feature_type='Antibody Capture'. See pipeline README."
+            "ui:help": "Standard 10x feature reference CSV. Use feature_type='Antibody Capture' for cell-hashing HTOs + CITE-seq antibodies, or 'Multiplexing Capture' for CMOs. See pipeline README."
         },
         "gex_reference_url": {
             "ui:help": "URL or s3:// URI to a 10x GEX reference tarball. Default is human GRCh38 2024-A. Downloaded once per run and shared across all pools."
@@ -39,13 +39,13 @@
             },
             "samples_sheet": {
                 "title": "Samples Samplesheet (CSV)",
-                "description": "Columns: run_id, sample_id, hashtag_ids",
+                "description": "Columns: run_id, sample_id, and either hashtag_ids or cmo_ids",
                 "type": "string",
                 "format": "data-url"
             },
             "feature_reference": {
                 "title": "Feature Reference CSV",
-                "description": "10x feature reference; HTOs as 'Multiplexing Capture', antibodies as 'Antibody Capture'",
+                "description": "Standard 10x feature reference (id, name, read, pattern, sequence, feature_type)",
                 "type": "string",
                 "format": "data-url"
             },
