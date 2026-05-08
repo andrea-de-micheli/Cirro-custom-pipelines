@@ -86,15 +86,17 @@ process CELLRANGER_MULTI {
 
 
 workflow {
-    // .first() makes the singleton ref broadcast to every pool task.
-    ref_ch = DOWNLOAD_REFERENCE(file(params.gex_reference_url)).first()
+    ref_ch = DOWNLOAD_REFERENCE(file(params.gex_reference_url))
 
     pools_ch = Channel
         .fromPath("${params.pool_dir}/pools.tsv")
         .splitCsv(header: true, sep: '\t')
         .map { row ->
+            // Underscore after the fastq_id matches cellranger's filename convention
+            // (<fastq_id>_S<n>_L<n>_R<n>_001.fastq.gz) and stops one fastq_id from
+            // also globbing files of another that has it as a prefix.
             def fastqs = row.fastq_ids.tokenize('|').collectMany { fid ->
-                def m = file("${params.input_dir}/**/${fid}*.fastq.gz", checkIfExists: false)
+                def m = file("${params.input_dir}/**/${fid}_*.fastq.gz", checkIfExists: false)
                 m instanceof List ? m : (m ? [m] : [])
             }
             if (fastqs.isEmpty()) error "No FASTQ files matched '${row.fastq_ids}' under ${params.input_dir} (pool ${row.run_id})"
