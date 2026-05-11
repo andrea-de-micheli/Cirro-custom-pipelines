@@ -1,0 +1,63 @@
+{
+    "ui": {
+        "threads": {
+            "ui:help": "CPU threads for 10x bamtofastq. More threads = faster conversion but higher cost."
+        },
+        "reads_per_fastq": {
+            "ui:help": "Maximum reads per output FASTQ chunk. The default (50,000,000) matches bamtofastq's own default; lower values produce more, smaller files."
+        },
+        "flatten": {
+            "ui:help": "If enabled, all output FASTQs land in the output dataset root prefixed with the BAM basename (e.g. sampleA_S1_L001_R1_001.fastq.gz). If disabled, each BAM gets its own subdirectory."
+        },
+        "memory_gb": {
+            "ui:help": "RAM allocated per BAM conversion task."
+        },
+        "disk_gb": {
+            "ui:help": "Worker disk allocation per task. Should be roughly 4-5x the size of the largest BAM to hold the BAM + extracted FASTQs."
+        }
+    },
+    "form": {
+        "title": "BAM to FASTQ (Cell Ranger)",
+        "description": "Convert 10x Cell Ranger BAM files back to FASTQ using 10x Genomics bamtofastq. Discovers all BAMs recursively across one or more input datasets and emits a single combined output dataset. Auto-detects paired-end/single-end/index reads from the BAM header.",
+        "type": "object",
+        "properties": {
+            "threads": {
+                "title": "CPU Threads",
+                "description": "Number of CPU threads per BAM conversion (4-16 recommended).",
+                "type": "integer",
+                "default": 8,
+                "minimum": 2,
+                "maximum": 32
+            },
+            "reads_per_fastq": {
+                "title": "Reads per FASTQ chunk",
+                "description": "Maximum reads per output FASTQ file. Lower values produce more, smaller files.",
+                "type": "integer",
+                "default": 50000000,
+                "minimum": 1000000
+            },
+            "flatten": {
+                "title": "Flatten directory structure",
+                "description": "Place all FASTQs in the output dataset root, prefixed with the BAM basename. Useful when feeding the output directly into valinor-cellranger.",
+                "type": "boolean",
+                "default": false
+            },
+            "memory_gb": {
+                "title": "Memory (GB)",
+                "description": "RAM allocated per BAM conversion task.",
+                "type": "integer",
+                "default": 16,
+                "minimum": 8,
+                "maximum": 128
+            },
+            "disk_gb": {
+                "title": "Disk (GB)",
+                "description": "Worker disk allocation per task. Scale up for very large BAMs.",
+                "type": "integer",
+                "default": 1000,
+                "minimum": 100,
+                "maximum": 8000
+            }
+        }
+    }
+}

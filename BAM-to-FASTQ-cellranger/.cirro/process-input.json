@@ -1,0 +1,9 @@
+{
+    "input_dir": "$.inputs[*].dataPath",
+    "threads": "$.dataset.params.threads",
+    "reads_per_fastq": "$.dataset.params.reads_per_fastq",
+    "flatten": "$.dataset.params.flatten",
+    "memory_gb": "$.dataset.params.memory_gb",
+    "disk_gb": "$.dataset.params.disk_gb",
+    "outdir": "$.dataset.dataPath"
+}
