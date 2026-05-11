@@ -18,6 +18,7 @@ params.reads_per_fastq = 50000000        // bamtofastq chunk size
 params.flatten         = false           // true → all FASTQs in outdir root, prefixed with BAM name
 params.memory_gb       = 16
 params.disk_gb         = 1000
+params.exclude_pattern = null            // comma-sep globs of BAM filenames to skip (e.g. "*.all_contig.bam")
 
 /*
  * Resolve params.input_dir into a list of glob patterns. Handles:
@@ -42,6 +43,20 @@ def input_globs() {
     return paths.collect { p -> "${p.replaceAll('/$', '')}/**/*.bam" }
 }
 
+def exclude_patterns() {
+    if (!params.exclude_pattern) return []
+    return params.exclude_pattern
+        .toString()
+        .split(/[,\n\r]+/)
+        .collect { it.trim() }
+        .findAll { it.length() > 0 }
+}
+
+def glob_to_regex(String glob) {
+    // Minimal glob → regex: . → \., * → .*, ? → .
+    return '^' + glob.replace('.', '\\.').replace('*', '.*').replace('?', '.') + '$'
+}
+
 log.info """
     BAM-to-FASTQ-cellranger
     =======================
@@ -50,6 +65,7 @@ log.info """
     threads         : ${params.threads}
     reads_per_fastq : ${params.reads_per_fastq}
     flatten         : ${params.flatten}
+    exclude_pattern : ${exclude_patterns() ?: '(none)'}
     outdir          : ${params.outdir}
 """.stripIndent()
 
@@ -101,10 +117,22 @@ process BAM_TO_FASTQ {
 }
 
 workflow {
+    def excludes = exclude_patterns()
+    def exclude_regexes = excludes.collect { glob_to_regex(it) }
+
     bam_ch = Channel
         .fromPath(input_globs(), checkIfExists: false)
         .filter { it.name.endsWith('.bam') }
-        .ifEmpty { error "No BAM files found under ${params.input_dir}" }
+        .filter { bam ->
+            def name = bam.name
+            def matched = exclude_regexes.find { rx -> name ==~ rx }
+            if (matched) {
+                log.info "Excluding BAM ${name} (matches pattern)"
+                return false
+            }
+            return true
+        }
+        .ifEmpty { error "No BAM files found under ${params.input_dir} (after exclude_pattern filter)" }
 
     bam_ch.view { "Found BAM: ${it}" }
 

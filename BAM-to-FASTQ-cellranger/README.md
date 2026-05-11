@@ -51,6 +51,40 @@ reads with the paired flag.)
 | `flatten` | false | Place all FASTQs in `results/` root, prefixed with BAM name. |
 | `memory_gb` | 16 | RAM per task (8-128). |
 | `disk_gb` | 1000 | Worker disk per task (100-8000). |
+| `exclude_pattern` | (empty) | Comma-separated glob patterns of BAM filenames to skip. See below. |
+
+### Skipping incompatible BAMs (`exclude_pattern`)
+
+Not every Cell Ranger BAM can be processed by `bamtofastq`. In particular,
+**`cellranger vdj`** outputs (e.g. `*.all_contig.bam`, `*.consensus.bam`) are
+alignments to assembled VDJ contigs, not to a reference genome, and they
+lack the `@CO 10x_bam_to_fastq:` header lines that `bamtofastq` requires.
+On such files the tool errors with:
+
+```
+Unrecognized 10x BAM file. For BAM files produced by older pipelines, use one
+of the following flags: --gemcode --lr20 --cr11
+```
+
+Use `exclude_pattern` to skip them at glob time:
+
+```
+exclude_pattern: *.all_contig.bam,*.consensus.bam
+```
+
+Patterns are matched against the **BAM filename only** (not the full path).
+Standard glob wildcards: `*` matches any chars, `?` matches one char.
+
+If you need to recover the original VDJ FASTQs, that data has to come from
+elsewhere — there is no reliable way to reconstruct the original cell-barcoded
+R1/R2 reads from a vdj `all_contig.bam`.
+
+### Failure handling
+
+`errorStrategy` is set to retry once, then ignore. This means a single
+incompatible BAM will not kill the whole run — failures are logged and the
+remaining BAMs complete. Check the Cirro task list (or `.nextflow.log`) for
+which BAMs were skipped.
 
 ## Input
 
