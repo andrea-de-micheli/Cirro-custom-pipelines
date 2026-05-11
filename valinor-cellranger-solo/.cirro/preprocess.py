@@ -31,7 +31,9 @@ def main() -> None:
         ds.add_param("libraries_sheet", libs_path, overwrite=True)
         ds.logger.info(f"libraries_sheet override active: {libs_path}")
     else:
-        ds.remove_param("libraries_sheet")
+        # Optional field: Cirro omits empty form values from params entirely,
+        # so use force=True to avoid an assertion when the key isn't present.
+        ds.remove_param("libraries_sheet", force=True)
         ds.logger.info("No libraries_sheet — main.nf will auto-detect samples from filenames")
 
     ds.logger.info(f"Input dir(s) from params: {ds.params.get('input_dir')!r}")

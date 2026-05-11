@@ -63,10 +63,12 @@ def classify_marker(String marker) {
 
 /*
  * Parse a FASTQ filename into (sample, fastq_id, library_type).
+ * Accepts both R1/R2 (cDNA reads) and I1/I2 (index reads), and any chunk
+ * number — bamtofastq emits chunks _001, _002, _003... not just _001.
  * Returns null if the filename doesn't match the 10x naming convention.
  */
 def parse_fastq(fastq_path) {
-    def m = (fastq_path.name =~ /^(.+)_S\d+_L\d+_R\d+_001\.fastq\.gz$/)
+    def m = (fastq_path.name =~ /^(.+)_S\d+_L\d+_[RI]\d+_\d+\.fastq\.gz$/)
     if (!m.find()) return null
     def fastq_id = m.group(1)
     def parts    = fastq_id.tokenize('.')
