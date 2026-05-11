@@ -1,0 +1,35 @@
+{
+    "id": "process-valinor-cellranger-solo-0_1",
+    "name": "Valinor Cellranger Count (solo)",
+    "desc": "Run cellranger count (GEX-only, non-multiplexed) per sample. Auto-detects samples from FASTQ filename convention <sample>.<libtype>.*_S*_L*_R*_001.fastq.gz.",
+    "executor": "NEXTFLOW",
+    "pipelineTypeOverride": "Community",
+    "category": "RNA Sequencing",
+    "documentationUrl": "https://github.com/andrea-de-micheli/Cirro-custom-pipelines/blob/main/valinor-cellranger-solo/README.md",
+    "code": {
+        "repository": "GITHUBPRIVATE",
+        "uri": "andrea-de-micheli/Cirro-custom-pipelines",
+        "script": "valinor-cellranger-solo/main.nf",
+        "version": "main"
+    },
+    "parentProcessIds": [
+        "custom_dataset",
+        "process-bam-to-fastq-cellranger-0_1"
+    ],
+    "childProcessIds": [],
+    "dataType": "Cellranger Count outputs (solo)",
+    "usesSampleSheet": false,
+    "allowMultipleSources": true,
+    "computeDefaults": [
+        {
+            "executor": "NEXTFLOW",
+            "json": "s3://<RESOURCES_BUCKET>/<PROCESS_DIRECTORY>/process-compute.config",
+            "name": "Default"
+        }
+    ],
+    "paramMapJson": "s3://<RESOURCES_BUCKET>/<PROCESS_DIRECTORY>/process-input.json",
+    "preProcessScript": "s3://<RESOURCES_BUCKET>/<PROCESS_DIRECTORY>/preprocess.py",
+    "formJson": "s3://<RESOURCES_BUCKET>/<PROCESS_DIRECTORY>/process-form.json",
+    "webOptimizationJson": "",
+    "fileMappingRules": []
+}

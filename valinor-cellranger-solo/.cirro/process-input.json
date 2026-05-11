@@ -1,0 +1,10 @@
+{
+    "libraries_sheet":   "$.dataset.params.libraries_sheet",
+    "gex_reference_url": "$.dataset.params.gex_reference_url",
+    "create_bam":        "$.dataset.params.create_bam",
+    "cpus":              "$.dataset.params.cpus",
+    "memory_gb":         "$.dataset.params.memory_gb",
+    "disk_gb":           "$.dataset.params.disk_gb",
+    "input_dir":         "$.inputs[*].dataPath",
+    "outdir":            "$.dataset.dataPath"
+}

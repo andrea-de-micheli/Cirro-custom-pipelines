@@ -1,0 +1,72 @@
+{
+    "ui": {
+        "libraries_sheet": {
+            "ui:help": "Optional. CSV with columns sample_id, fastq_id, library_type. Overrides the filename-based auto-detection on a per-fastq_id basis. Leave empty to auto-detect everything from filenames."
+        },
+        "gex_reference_url": {
+            "ui:help": "URL or s3:// URI to a 10x GEX reference tarball. Default is human GRCh38 2024-A. Downloaded once per run and shared across all samples."
+        },
+        "create_bam": {
+            "ui:help": "If checked, cellranger writes position-sorted BAMs (adds tens of GB per sample). Off by default. Applies to every sample."
+        },
+        "cpus": {
+            "ui:help": "localcores per sample. Match to the Batch instance vCPU count."
+        },
+        "memory_gb": {
+            "ui:help": "localmem per sample (GB). Match to the Batch instance memory, leaving ~8 GB headroom."
+        },
+        "disk_gb": {
+            "ui:help": "Scratch space per sample. Budget ~5x the staged FASTQ size."
+        }
+    },
+    "form": {
+        "title": "Valinor Cellranger Count (solo)",
+        "description": "Run cellranger count (GEX-only, non-multiplexed) per sample. Samples are auto-detected from the FASTQ filename convention <sample>.<libtype>.*_S*_L*_R*_001.fastq.gz. Non-GEX libraries (VDJ, Antibody Capture, etc.) are logged and skipped.",
+        "type": "object",
+        "required": ["gex_reference_url"],
+        "properties": {
+            "libraries_sheet": {
+                "title": "Libraries Sheet (optional CSV)",
+                "description": "Optional override. Columns: sample_id, fastq_id, library_type. Use when filenames don't match the auto-detect convention.",
+                "type": "string",
+                "format": "data-url"
+            },
+            "gex_reference_url": {
+                "title": "GEX Reference URL",
+                "description": "HTTPS URL or s3:// URI to the 10x GEX reference tarball",
+                "type": "string",
+                "default": "https://cf.10xgenomics.com/supp/cell-exp/refdata-gex-GRCh38-2024-A.tar.gz"
+            },
+            "create_bam": {
+                "title": "Create BAM",
+                "description": "Write position-sorted BAM files (large; off by default)",
+                "type": "boolean",
+                "default": false
+            },
+            "cpus": {
+                "title": "CPUs per sample",
+                "description": "cellranger --localcores",
+                "type": "integer",
+                "default": 30,
+                "minimum": 4,
+                "maximum": 96
+            },
+            "memory_gb": {
+                "title": "Memory per sample (GB)",
+                "description": "cellranger --localmem",
+                "type": "integer",
+                "default": 200,
+                "minimum": 32,
+                "maximum": 768
+            },
+            "disk_gb": {
+                "title": "Disk per sample (GB)",
+                "description": "Worker scratch space",
+                "type": "integer",
+                "default": 2000,
+                "minimum": 500,
+                "maximum": 8000
+            }
+        }
+    }
+}
