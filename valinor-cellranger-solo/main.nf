@@ -102,6 +102,14 @@ def parse_libraries_sheet(csv_file) {
     return out
 }
 
+// cellranger 10 restricts --sample names to [A-Za-z0-9_-]. Map any other
+// character to '_'. Idempotent on already-clean ids. Two distinct originals
+// could in theory collapse (e.g. "A.B" and "A_B"); not realistic for the
+// BAM-basename naming this pipeline consumes.
+def sanitize_fastq_id(String id) {
+    return id.replaceAll(/[^A-Za-z0-9_-]/, '_')
+}
+
 log.info """
     valinor-cellranger-solo
     =======================
@@ -146,7 +154,7 @@ process CELLRANGER_COUNT {
     publishDir "${params.outdir}", mode: 'copy', pattern: "${sample_id}/outs/**"
 
     input:
-    tuple val(sample_id), val(fastq_ids), path(fastqs)
+    tuple val(sample_id), val(orig_fastq_ids), val(fastq_ids), path(fastqs)
     path  ref_dir
 
     output:
@@ -157,7 +165,23 @@ process CELLRANGER_COUNT {
     def cb = (params.create_bam as String).toLowerCase() in ['1','true','yes'] ? 'true' : 'false'
     """
     set -euo pipefail
-    mkdir fastqs && mv *.fastq.gz fastqs/
+    mkdir fastqs
+
+    # Sanitize the prefix portion of each FASTQ filename so it matches the
+    # sanitized --sample= value below. cellranger 10 only allows [A-Za-z0-9_-]
+    # in sample names; same character class as sanitize_fastq_id() in main.nf.
+    shopt -s nullglob
+    for f in *.fastq.gz; do
+        if [[ "\$f" =~ ^(.+)(_S[0-9]+_L[0-9]+_[RI][0-9]+_[0-9]+\\.fastq\\.gz)\$ ]]; then
+            prefix="\${BASH_REMATCH[1]}"
+            suffix="\${BASH_REMATCH[2]}"
+            clean=\$(printf '%s' "\$prefix" | sed 's/[^A-Za-z0-9_-]/_/g')
+            mv "\$f" "fastqs/\${clean}\${suffix}"
+        else
+            echo "WARN: unexpected FASTQ filename (not 10x convention): \$f" >&2
+            mv "\$f" "fastqs/\$f"
+        fi
+    done
 
     cellranger count \\
         --id=${sample_id} \\
@@ -198,17 +222,22 @@ workflow {
         .filter { it.library_type != 'Gene Expression' }
         .view { "Skipping (${it.library_type}): ${it.path.name}" }
 
-    // 4. Group GEX FASTQs by sample and dispatch to cellranger count
+    // 4. Group GEX FASTQs by sample and dispatch to cellranger count.
+    // Sanitize fastq_id here (post libraries_sheet override) so the value passed
+    // to cellranger --sample= is cellranger-safe. The original is carried
+    // through for the log line only.
     sample_ch = classified
         .filter { it.library_type == 'Gene Expression' }
-        .map { [it.sample, it.fastq_id, it.path] }
+        .map { [it.sample, it.fastq_id, sanitize_fastq_id(it.fastq_id), it.path] }
         .groupTuple()
-        .map { sample, fids, paths ->
-            tuple(sample, fids.unique(), paths.unique())
+        .map { sample, orig_fids, clean_fids, paths ->
+            tuple(sample, orig_fids.unique(), clean_fids.unique(), paths.unique())
         }
         .ifEmpty { error "No GEX FASTQ files found in ${params.input_dir}" }
 
-    sample_ch.view { sample, fids, _paths -> "Sample ${sample}: ${fids.size()} fastq_id(s) = ${fids}" }
+    sample_ch.view { sample, orig, clean, _paths ->
+        "Sample ${sample}: ${orig.size()} fastq_id(s) = ${orig} -> sanitized ${clean}"
+    }
 
     CELLRANGER_COUNT(sample_ch, ref_ch)
 }
